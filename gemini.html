@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subway Run - High Fidelity</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Arial Black', sans-serif; background: #87CEEB; }
+        canvas { display: block; }
+
+        /* UI HUD - Based on Aloha Beach Theme */
+        #ui-layer { position: absolute; inset: 0; pointer-events: none; color: white; }
+        
+        .hud-container {
+            position: absolute; top: 20px; right: 20px;
+            display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+        }
+
+        .pill { 
+            background: rgba(0, 0, 0, 0.75); padding: 10px 25px; border-radius: 50px; 
+            border: 4px solid #fff; display: flex; align-items: center; 
+            font-size: 1.6rem; min-width: 200px; box-shadow: 0 6px 0px rgba(0,0,0,0.4);
+            text-shadow: 2px 2px #000;
+        }
+
+        .label-gold { color: #f1c40f; font-size: 0.9rem; margin-right: 12px; text-transform: uppercase; }
+        .val-gold { color: #f1c40f; }
+
+        /* Speed Meter UI */
+        .meter-container { width: 200px; height: 14px; background: #000; border: 3px solid #fff; border-radius: 10px; overflow: hidden; }
+        #speed-bar { width: 0%; height: 100%; background: linear-gradient(to right, #2ecc71, #f1c40f, #e74c3c); transition: width 0.3s; }
+
+        /* Overlays - Large Buttons */
+        .overlay {
+            position: absolute; inset: 0; 
+            background: radial-gradient(circle, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.8) 100%);
+            display: flex; flex-direction: column; justify-content: center; align-items: center; 
+            pointer-events: auto; z-index: 100;
+        }
+
+        h1 { font-size: 5.5rem; color: #fff; -webkit-text-stroke: 3px #d35400; text-shadow: 6px 6px #8e44ad; margin: 0; }
+
+        .btn-action {
+            margin-top: 40px; padding: 18px 80px; font-size: 2.8rem; background: #2ecc71;
+            color: white; border: none; border-radius: 80px; cursor: pointer;
+            box-shadow: 0 10px #27ae60; transition: 0.1s; text-transform: uppercase;
+        }
+        .btn-action:active { transform: translateY(6px); box-shadow: 0 4px #27ae60; }
+        
+        #game-over-ui { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div class="hud-container">
+            <div class="pill" style="border-color: #f1c40f;">
+                <span class="label-gold">Best</span>
+                <span id="high-score" class="val-gold">00000</span>
+            </div>
+            <div class="pill">
+                <span id="score">00000</span>
+            </div>
+            <div class="pill">
+                <span style="color: #f1c40f; margin-right: 15px;">💰</span>
+                <span id="coins" class="val-gold">0</span>
+            </div>
+            <div class="meter-container"><div id="speed-bar"></div></div>
+        </div>
+        
+        <div id="menu-overlay" class="overlay">
+            <h1>SUBWAY RUN</h1>
+            <p style="color:white; font-size:1.4rem; margin-top:15px; text-shadow:2px 2px #000">W: JUMP | S: ROLL | A/D: MOVE</p>
+            <button class="btn-action" id="start-btn">PLAY</button>
+        </div>
+
+        <div id="game-over-ui" class="overlay">
+            <h1 style="color:#ff4d4d; -webkit-text-stroke: 3px #900;">CRASHED!</h1>
+            <div style="font-size:2.2rem; color:white; margin:25px; text-shadow:2px 2px #000">FINAL SCORE: <span id="final-score" class="val-gold">0</span></div>
+            <button class="btn-action" onclick="location.reload()">RETRY</button>
+        </div>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- Game Setup ---
+        const LANES = [-4.5, 0, 4.5];
+        let currentLane = 1, gameActive = false, score = 0, coinCount = 0;
+        let gameSpeed = 0.8, jumpVel = 0, isJumping = false, isDucking = false;
+        const obstacles = [], coinObjects = [], buildings = [], trackElements = [], clouds = [];
+
+        let highScore = localStorage.getItem('subwayHighScore') || 0;
+        document.getElementById('high-score').innerText = Math.floor(highScore).toString().padStart(5, '0');
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 20, 200);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 9, 18);
+        camera.lookAt(0, 2, -10);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+        const sun = new THREE.DirectionalLight(0xffffff, 1.3);
+        sun.position.set(20, 50, 10);
+        scene.add(sun);
+
+        // --- Environment Architecture ---
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(100, 2000), new THREE.MeshStandardMaterial({color: 0x555555}));
+        ground.rotation.x = -Math.PI/2;
+        scene.add(ground);
+
+        function setupTracks() {
+            LANES.forEach(x => {
+                const railMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 });
+                [-0.8, 0.8].forEach(rx => {
+                    const r = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.35, 2000), railMat);
+                    r.position.set(x + rx, 0.17, 0); scene.add(r);
+                });
+                for(let z=0; z>-1000; z-=5.5) {
+                    const s = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.18, 1.2), new THREE.MeshStandardMaterial({color: 0x3d2b1f}));
+                    s.position.set(x, 0.09, z); scene.add(s); trackElements.push(s);
+                }
+            });
+        }
+
+        const cityPalette = [0xff595e, 0xffca3a, 0x8ac926, 0x1982c4, 0x6a4c93];
+        function setupWorld() {
+            for(let z=0; z>-600; z-=30) {
+                [-28, 28].forEach(x => {
+                    const h = 30 + Math.random()*30;
+                    const b = new THREE.Mesh(new THREE.BoxGeometry(15, h, 15), new THREE.MeshStandardMaterial({color: cityPalette[Math.floor(Math.random()*5)]}));
+                    b.position.set(x, h/2, z); scene.add(b); buildings.push(b);
+                });
+                const cloud = new THREE.Mesh(new THREE.SphereGeometry(4, 10, 10), new THREE.MeshStandardMaterial({color: 0xffffff, transparent: true, opacity: 0.8}));
+                cloud.scale.set(3, 0.9, 2); cloud.position.set(Math.random()*100-50, 45+Math.random()*15, z);
+                scene.add(cloud); clouds.push(cloud);
+            }
+        }
+
+        setupTracks();
+        setupWorld();
+
+        // --- Player ---
+        const runner = new THREE.Group();
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.6), new THREE.MeshStandardMaterial({color: 0xffdbac}));
+        head.position.y = 2.8;
+        const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 1.2), new THREE.MeshStandardMaterial({color: 0x1982c4}));
+        body.position.y = 1.8;
+        runner.add(head, body);
+        scene.add(runner);
+
+        // --- Logic Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            if(gameActive) {
+                runner.position.x = THREE.MathUtils.lerp(runner.position.x, LANES[currentLane], 0.16);
+                
+                if(isJumping) {
+                    runner.position.y += jumpVel; jumpVel -= 0.024;
+                    if(runner.position.y <= 0) { runner.position.y = 0; isJumping = false; }
+                }
+
+                // Recycle Environment
+                [buildings, trackElements, clouds].forEach(arr => arr.forEach(obj => {
+                    obj.position.z += gameSpeed; if(obj.position.z > 60) obj.position.z -= 600;
+                }));
+
+                updateEntities(obstacles, true);
+                updateEntities(coinObjects, false);
+
+                score += (gameSpeed * 0.5);
+                gameSpeed = Math.min(3.2, gameSpeed + 0.00018);
+                document.getElementById('score').innerText = Math.floor(score).toString().padStart(5, '0');
+                document.getElementById('speed-bar').style.width = ((gameSpeed / 3.2) * 100) + "%";
+            }
+            renderer.render(scene, camera);
+        }
+
+        function updateEntities(arr, isObs) {
+            for(let i = arr.length - 1; i >= 0; i--) {
+                arr[i].position.z += gameSpeed;
+                const pBox = new THREE.Box3().setFromObject(runner);
+                const oBox = new THREE.Box3().setFromObject(arr[i]);
+
+                if(pBox.intersectsBox(oBox)) {
+                    if(isObs) {
+                        // Crouch/Roll logic for high obstacles
+                        if(arr[i].userData.isHigh && isDucking) continue; 
+                        
+                        gameActive = false;
+                        document.getElementById('game-over-ui').style.display = 'flex';
+                        document.getElementById('final-score').innerText = Math.floor(score);
+                        if(score > highScore) localStorage.setItem('subwayHighScore', Math.floor(score));
+                    } else {
+                        scene.remove(arr[i]); arr.splice(i, 1);
+                        coinCount++; document.getElementById('coins').innerText = coinCount;
+                    }
+                } else if(arr[i].position.z > 25) {
+                    scene.remove(arr[i]); arr.splice(i, 1);
+                }
+            }
+        }
+
+        function spawn() {
+            if(!gameActive) return;
+            const lane = LANES[Math.floor(Math.random()*3)];
+            const isHigh = Math.random() > 0.7; // Yellow Barrier
+
+            if(Math.random() > 0.45) {
+                const obs = new THREE.Mesh(
+                    new THREE.BoxGeometry(3.6, isHigh ? 1.4 : 4.8, isHigh ? 1.2 : 9), 
+                    new THREE.MeshStandardMaterial({color: isHigh ? 0xf1c40f : 0x222222})
+                );
+                obs.position.set(lane, isHigh ? 6.2 : 2.4, -220);
+                obs.userData.isHigh = isHigh;
+                scene.add(obs); obstacles.push(obs);
+            } else {
+                const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.65,0.65,0.25,16), new THREE.MeshStandardMaterial({color:0xf1c40f, emissive:0xf1c40f}));
+                coin.rotation.x = Math.PI/2; coin.position.set(lane, 1.8, -220);
+                scene.add(coin); coinObjects.push(coin);
+            }
+            setTimeout(spawn, Math.max(250, 1100 - (gameSpeed * 280)));
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if(!gameActive) return;
+            if((e.key === 'a' || e.key === 'ArrowLeft') && currentLane > 0) currentLane--;
+            if((e.key === 'd' || e.key === 'ArrowRight') && currentLane < 2) currentLane++;
+            if((e.key === 'w' || e.key === 'ArrowUp' || e.key === ' ') && !isJumping) { isJumping = true; jumpVel = 0.5; }
+            if((e.key === 's' || e.key === 'ArrowDown')) {
+                isDucking = true; runner.scale.y = 0.5; runner.position.y = 0;
+                setTimeout(() => { isDucking = false; runner.scale.y = 1; }, 850);
+            }
+        });
+
+        document.getElementById('start-btn').onclick = () => { document.getElementById('menu-overlay').style.display='none'; gameActive = true; spawn(); };
+        animate();
+    </script>
+</body>
+</html>

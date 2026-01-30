@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Subway Runner – Coins Working</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+html,body{
+    margin:0;
+    padding:0;
+    overflow:hidden;
+    background:#87ceeb;
+    font-family:Arial;
+}
+#hud{
+    position:fixed;
+    top:15px;
+    left:15px;
+    color:white;
+    font-size:22px;
+    z-index:10;
+}
+</style>
+</head>
+
+<body>
+
+<div id="hud">
+Score: <span id="score">0</span> |
+Coins: <span id="coins">0</span>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+<script>
+/* ======================================================
+   BASIC SETUP
+====================================================== */
+
+let scene, camera, renderer;
+let player;
+let sleepers = [];
+let coins = [];
+
+const LANES = [-3.5, 0, 3.5];
+let currentLane = 1;
+
+let speed = 0.6;
+let gravity = 0.025;
+let velocityY = 0;
+let isJumping = false;
+
+let score = 0;
+let coinCount = 0;
+
+/* ======================================================
+   INIT
+====================================================== */
+
+init();
+animate();
+
+function init(){
+
+    scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x87ceeb, 10, 200);
+
+    camera = new THREE.PerspectiveCamera(
+        65,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        500
+    );
+    camera.position.set(0, 6, 14);
+    camera.lookAt(0, 2, -20);
+
+    renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    /* LIGHT */
+    scene.add(new THREE.HemisphereLight(0xffffff,0x444444,1.2));
+    const sun = new THREE.DirectionalLight(0xffffff,1);
+    sun.position.set(10,20,10);
+    scene.add(sun);
+
+    createTrack();
+    createRunner();
+}
+
+/* ======================================================
+   TRACK
+====================================================== */
+
+function createTrack(){
+
+    const sleeperMat = new THREE.MeshStandardMaterial({color:0x5b3a1e});
+    const railMat = new THREE.MeshStandardMaterial({color:0xb0b0b0});
+
+    for(let i=0;i<120;i++){
+        const s = new THREE.Mesh(
+            new THREE.BoxGeometry(14,0.3,1),
+            sleeperMat
+        );
+        s.position.set(0,0.15,-i*2);
+        scene.add(s);
+        sleepers.push(s);
+    }
+
+    LANES.forEach(x=>{
+        const rail = new THREE.Mesh(
+            new THREE.BoxGeometry(0.25,0.25,500),
+            railMat
+        );
+        rail.position.set(x,0.4,-250);
+        scene.add(rail);
+    });
+}
+
+/* ======================================================
+   PLAYER
+====================================================== */
+
+function createRunner(){
+
+    player = new THREE.Group();
+
+    const bodyMat = new THREE.MeshStandardMaterial({color:0xffffff});
+
+    const body = new THREE.Mesh(
+        new THREE.BoxGeometry(1.2,2,0.8),
+        bodyMat
+    );
+    body.position.y = 1;
+
+    const head = new THREE.Mesh(
+        new THREE.BoxGeometry(1,1,1),
+        new THREE.MeshStandardMaterial({color:0xffd6b0})
+    );
+    head.position.y = 2.4;
+
+    player.add(body);
+    player.add(head);
+
+    player.position.set(0,1,5);
+    scene.add(player);
+}
+
+/* ======================================================
+   SPAWN COIN
+====================================================== */
+
+function spawnCoin(){
+
+    const coin = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.45,0.45,0.2,16),
+        new THREE.MeshStandardMaterial({color:0xffd700})
+    );
+
+    coin.rotation.x = Math.PI / 2;
+
+    coin.position.set(
+        LANES[Math.floor(Math.random()*3)],
+        2,
+        -120
+    );
+
+    scene.add(coin);
+    coins.push(coin);
+}
+
+/* ======================================================
+   COIN COLLISION
+====================================================== */
+
+function checkCoinCollection(){
+
+    const playerBox = new THREE.Box3().setFromObject(player);
+
+    coins = coins.filter(coin => {
+
+        const coinBox = new THREE.Box3().setFromObject(coin);
+
+        if (playerBox.intersectsBox(coinBox)) {
+
+            coinCount++;
+            document.getElementById("coins").textContent = coinCount;
+
+            scene.remove(coin);
+            return false;
+        }
+
+        if (coin.position.z > 10) {
+            scene.remove(coin);
+            return false;
+        }
+
+        return true;
+    });
+}
+
+/* ======================================================
+   INPUT
+====================================================== */
+
+document.addEventListener("keydown", e => {
+
+    if(e.key === "ArrowLeft"){
+        currentLane = Math.max(0, currentLane - 1);
+    }
+
+    if(e.key === "ArrowRight"){
+        currentLane = Math.min(2, currentLane + 1);
+    }
+
+    if(e.key === "ArrowUp" && !isJumping){
+        velocityY = 0.5;
+        isJumping = true;
+    }
+});
+
+/* ======================================================
+   GAME LOOP
+====================================================== */
+
+function animate(){
+    requestAnimationFrame(animate);
+
+    sleepers.forEach(s=>{
+        s.position.z += speed;
+        if(s.position.z > 10) s.position.z = -240;
+    });
+
+    coins.forEach(c=>{
+        c.position.z += speed;
+        c.rotation.y += 0.1;
+    });
+
+    if(Math.random() < 0.03){
+        spawnCoin();
+    }
+
+    checkCoinCollection();
+
+    velocityY -= gravity;
+    player.position.y += velocityY;
+
+    if(player.position.y <= 1){
+        player.position.y = 1;
+        velocityY = 0;
+        isJumping = false;
+    }
+
+    const targetX = LANES[currentLane];
+    player.position.x += (targetX - player.position.x) * 0.25;
+
+    score++;
+    document.getElementById("score").textContent = score;
+
+    renderer.render(scene, camera);
+}
+
+/* ======================================================
+   RESIZE
+====================================================== */
+
+window.addEventListener("resize",()=>{
+    camera.aspect = innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+
+</body>
+</html>
