@@ -54,7 +54,7 @@ The secret isn't just the AI you use—it's the **Prompt Engineering** and **Tec
     ```
 2.  **Navigate to the folder:**
     ```bash
-    cd subway-surfers-ai
+    cd subway-surfer
     ```
 3.  **Launch the game:**
     Open `index.html` in your browser (preferably via a Live Server extension to ensure all Three.js assets load correctly).
