@@ -50,7 +50,7 @@ The secret isn't just the AI you use—it's the **Prompt Engineering** and **Tec
 ## 🎮 How to Run
 1.  **Clone the repository:**
     ```bash
-    git clone [https://github.com/your-username/subway-surfers-ai.git](https://github.com/your-username/subway-surfers-ai.git)
+    git clone [https://github.com/Vishalsinghpawargit/subway-surfer.git](https://github.com/Vishalsinghpawargit/subway-surfer.git)
     ```
 2.  **Navigate to the folder:**
     ```bash
